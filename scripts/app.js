@@ -2,19 +2,6 @@
 (function() {
   'use strict';
 
-  var weatherAPIUrlBase = 'https://publicdata-weather.firebaseio.com/';
-
-  var app = {
-    isLoading: true,
-    visibleCards: {},
-    selectedCities: [],
-    spinner: document.querySelector('.loader'),
-    cardTemplate: document.querySelector('.cardTemplate'),
-    container: document.querySelector('.main'),
-    addDialog: document.querySelector('.dialog-container'),
-    daysOfWeek: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  };
-
   var injectedForecast = {
     key: 'newyork',
     label: 'New York, NY',
@@ -40,6 +27,19 @@
         {icon: 'partly-cloudy-day', temperatureMax: 55, temperatureMin: 34}
       ]
     }
+  };
+
+  var weatherAPIUrlBase = 'https://publicdata-weather.firebaseio.com/';
+
+  var app = {
+    isLoading: true,
+    visibleCards: {},
+    selectedCities: [],
+    spinner: document.querySelector('.loader'),
+    cardTemplate: document.querySelector('.cardTemplate'),
+    container: document.querySelector('.main'),
+    addDialog: document.querySelector('.dialog-container'),
+    daysOfWeek: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
   };
 
 
@@ -96,6 +96,7 @@
   // Updates a weather card with the latest weather forecast. If the card
   // doesn't already exist, it's cloned from the template.
   app.updateForecastCard = function(data) {
+    console.log("updateForecastCard",data);
     var card = app.visibleCards[data.key];
     if (!card) {
       card = app.cardTemplate.cloneNode(true);
@@ -105,9 +106,16 @@
       app.container.appendChild(card);
       app.visibleCards[data.key] = card;
     }
+
+    // Verify data is newer than what we already have, if not, bail.
+    var dateElem = card.querySelector('.date');
+    if (dateElem.getAttribute('data-dt') >= data.currently.time) {
+      return;
+    }
+
+    dateElem.setAttribute('data-dt', data.currently.time);
+    dateElem.textContent = new Date(data.currently.time * 1000);
     card.querySelector('.description').textContent = data.currently.summary;
-    card.querySelector('.date').textContent =
-      new Date(data.currently.time * 1000);
     card.querySelector('.current .icon').classList.add(data.currently.icon);
     card.querySelector('.current .temperature .value').textContent =
       Math.round(data.currently.temperature);
@@ -154,20 +162,37 @@
   // Gets a forecast for a specific city and update the card with the data
   app.getForecast = function(key, label) {
     var url = weatherAPIUrlBase + key + '.json';
-    // Make the XHR to get the data, then update the card
-    var request = new XMLHttpRequest();
-    request.onreadystatechange = function() {
-      if (request.readyState === XMLHttpRequest.DONE) {
-        if (request.status === 200) {
-          var response = JSON.parse(request.response);
-          response.key = key;
-          response.label = label;
-          app.updateForecastCard(response);
+    console.log("url",url);
+    console.log("caches",window.caches);
+    if ('caches' in window) {
+      console.log("caches in window");
+      caches.match(url).then(function(response) {
+
+        if (response) {
+          response.json().then(function(json) {
+            json.key = key;
+            json.label = label;
+            app.updateForecastCard(json);
+          });
         }
-      }
-    };
-    request.open('GET', url);
-    request.send();
+      });
+    }
+    // Make the XHR to get the data, then update the card
+    try{
+      var request = new XMLHttpRequest();
+      request.onreadystatechange = function() {
+        if (request.readyState === XMLHttpRequest.DONE) {
+          if (request.status === 200) {
+            var response = JSON.parse(request.response);
+            response.key = key;
+            response.label = label;
+            app.updateForecastCard(response);
+          }
+        }
+      };
+      request.open('GET', url);
+      request.send();
+    }catch(exp){}
   };
 
   // Iterate all of the cards and attempt to get the latest forecast data
@@ -177,9 +202,6 @@
       app.getForecast(key);
     });
   };
-
-  
-  app.updateForecastCard(injectedForecast);
 
   app.saveSelectedCities = function() {
     window.localforage.setItem('selectedCities', app.selectedCities);
@@ -201,5 +223,13 @@
       }
     });    
   });
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker
+     .register('/service-worker.js')
+     .then(function() { 
+        console.log('Service Worker Registered'); 
+      });
+  }
 
 })();
